@@ -1,0 +1,323 @@
+#GRAPH
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using CodeMonkey.Utils;
+//using UnityEngine.UIElements;
+
+public class Window_Graph : MonoBehaviour
+{
+
+    public Sprite circleSprite;
+    public RectTransform graphContainer;
+    public RectTransform labelTemplateX;
+    public RectTransform labelTemplateY;
+    public RectTransform dashTemplateX;
+    public RectTransform dashTemplateY;
+
+
+    private void Awake()
+    {
+        graphContainer = transform.Find("graphContainer").GetComponent<RectTransform>();
+        labelTemplateX = graphContainer.Find("labelTemplateX").GetComponent<RectTransform>();
+        labelTemplateY = graphContainer.Find("labelTemplateY").GetComponent<RectTransform>();
+        dashTemplateX = graphContainer.Find("dashTemplateX").GetComponent<RectTransform>();
+        dashTemplateY = graphContainer.Find("dashTemplateY").GetComponent<RectTransform>();
+
+
+        List<int> valueList = new List<int>() { 5, 98, 56, 45, 30, 22, 17, 15, 13, 17, 25, 37, 40, 36, 33 };
+        ShowGraph(valueList);
+    }
+
+    private GameObject CreateCircle(Vector2 anchoredPosition)
+    {
+        GameObject gameObject = new GameObject("circle", typeof(Image));
+        gameObject.transform.SetParent(graphContainer, false);
+        gameObject.GetComponent<Image>().sprite = circleSprite;
+        RectTransform rectTransform = gameObject.GetComponent<RectTransform>();
+        rectTransform.anchoredPosition = anchoredPosition;
+        rectTransform.sizeDelta = new Vector2(11, 11);
+        rectTransform.anchorMin = new Vector2(0, 0);
+        rectTransform.anchorMax = new Vector2(0, 0);
+        return gameObject;
+    }
+
+    private void ShowGraph(List<int> valueList)
+    {
+        float graphHeight = graphContainer.sizeDelta.y;
+        float yMaximum = 100f;
+        float xSize = 50f;
+
+        GameObject lastCircleGameObject = null;
+        for (int i = 0; i < valueList.Count; i++)
+        {
+            float xPosition = xSize + i * xSize;
+            float yPosition = (valueList[i] / yMaximum) * graphHeight;
+            GameObject circleGameObject = CreateCircle(new Vector2(xPosition, yPosition));
+            if (lastCircleGameObject != null)
+            {
+                CreateDotConnection(lastCircleGameObject.GetComponent<RectTransform>().anchoredPosition, circleGameObject.GetComponent<RectTransform>().anchoredPosition);
+            }
+            lastCircleGameObject = circleGameObject;
+
+            RectTransform labelX = Instantiate(labelTemplateX);
+            labelX.SetParent(graphContainer);
+            labelX.gameObject.SetActive(true);
+            labelX.anchoredPosition = new Vector2(xPosition, -8f);
+            labelX.GetComponent<Text>().text = i.ToString();
+
+            RectTransform dashY = Instantiate(dashTemplateY);
+            dashY.SetParent(graphContainer,false);
+            dashY.gameObject.SetActive(true);
+            dashY.anchoredPosition = new Vector2(xPosition, -7f);
+        }
+
+        int SeparatorCount = 10;
+        for (int i = 0; i <= SeparatorCount; i++)
+        {
+            RectTransform labelY = Instantiate(labelTemplateY);
+            labelY.SetParent(graphContainer, false);
+            labelY.gameObject.SetActive(true);
+            float normalizedValue = i*1f/ SeparatorCount;
+            labelY.anchoredPosition = new Vector2(-15f, normalizedValue * graphHeight);
+            labelY.GetComponent<Text>().text = Mathf.RoundToInt(normalizedValue * yMaximum).ToString();
+
+            RectTransform dashX = Instantiate(dashTemplateX);
+            dashX.SetParent(graphContainer);
+            dashX.gameObject.SetActive(true);
+            dashX.anchoredPosition = new Vector2(-4f, normalizedValue * graphHeight);
+        }
+    }
+
+    private void CreateDotConnection(Vector2 dotPositionA, Vector2 dotPositionB)
+    {
+        GameObject gameObject = new GameObject("dotConnection", typeof(Image));
+        gameObject.transform.SetParent(graphContainer, false);
+        gameObject.GetComponent<Image>().color = new Color(1, 1, 1, .5f);
+        RectTransform rectTransform = gameObject.GetComponent<RectTransform>();
+        Vector2 dir = (dotPositionB - dotPositionA).normalized;
+        float distance = Vector2.Distance(dotPositionA, dotPositionB);
+        rectTransform.anchorMin = new Vector2(0, 0);
+        rectTransform.anchorMax = new Vector2(0, 0);
+        rectTransform.sizeDelta = new Vector2(distance, 3f);
+        rectTransform.anchoredPosition = dotPositionA + dir * distance * .5f;
+        rectTransform.localEulerAngles = new Vector3(0, 0, UtilsClass.GetAngleFromVectorFloat(dir));
+    }
+    
+}
+
+
+
+
+#SENSOR CODE
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using uPLibrary.Networking.M2Mqtt;
+using uPLibrary.Networking.M2Mqtt.Messages;
+using M2MqttUnity;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEditor.PackageManager;
+
+public class flow : M2MqttUnityClient
+{
+    public bool autoTest = false;
+    public Text sensortextbox;
+    private bool isClientConnected = false;
+    private List<string> eventMessages = new List<string>();
+    public Text Consoletextbox;
+
+    public void SetBrokerAddress(string brokerAddress)
+    {
+        this.brokerAddress = brokerAddress;
+    }
+
+    public void SetBrokerPort(string brokerPort)
+    {
+        int.TryParse(brokerPort, out this.brokerPort);
+    }
+
+    public void SetEncrypted(bool isEncrypted)
+    {
+        this.isEncrypted = isEncrypted;
+    }
+
+    public void SetUiMessage(string msg)
+    {
+        if (sensortextbox != null)
+        {
+            sensortextbox.text = msg;
+        }
+    }
+ protected override void OnConnecting()
+    {
+        base.OnConnecting();
+        Debug.Log("Connecting to broker on " + brokerAddress + ":" + brokerPort.ToString() + "...\n");
+    }
+
+    public void AddUiMessage(string msg)
+    {
+        if (sensortextbox != null)
+        {
+            sensortextbox.text = msg;
+        }
+    }
+
+    protected override void OnConnected()
+    {
+        base.OnConnected();
+        Debug.Log("Connected to broker on " + brokerAddress + "\n");
+        isClientConnected = true;
+    }
+    protected override void SubscribeTopics()
+    {
+        client.Subscribe(new string[] { "oilnew/flow" }, new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE });
+    }
+
+    protected override void UnsubscribeTopics()
+    {
+        client.Unsubscribe(new string[] { "oilnew/flow" });
+    }
+
+    protected override void OnConnectionFailed(string errorMessage)
+    {
+        Debug.Log("CONNECTION FAILED! " + errorMessage);
+    }
+
+    protected override void OnDisconnected()
+    {
+        Debug.Log("Disconnected.");
+    }
+ protected override void OnConnectionLost()
+    {
+        Debug.Log("CONNECTION LOST!");
+    }
+
+    protected override void Start()
+    {
+        Debug.Log("Ready.");
+        base.Start();
+    }
+    protected override void DecodeMessage(string topic, byte[] message)
+    {
+        string msg = System.Text.Encoding.UTF8.GetString(message);
+        Debug.Log("Received: " + msg);
+        Consoletextbox.text = "Received: " + msg + "\n";
+        StoreMessage(msg);
+        if (topic == "oilnew/flow")
+        {
+            if (autoTest)
+            {
+                autoTest = false;
+                Disconnect();
+            }
+        }
+    }
+
+    private void StoreMessage(string eventMsg)
+    {
+        eventMessages.Add(eventMsg);
+    }
+
+    private void ProcessMessage(string msg)
+    {
+        AddUiMessage(msg);
+    }
+ protected override void Update()
+    {
+        base.Update(); // call ProcessMqttEvents()
+
+        if (eventMessages.Count > 0)
+        {
+            foreach (string msg in eventMessages)
+            {
+                ProcessMessage(msg);
+            }
+            eventMessages.Clear();
+        }
+    }
+
+    private void OnDestroy()
+    {
+        Disconnect();
+    }
+
+    private void OnValidate()
+    {
+        if (autoTest)
+        {
+            autoConnect = true;
+        }
+    }
+}
+
+
+
+#MOTOR
+using UnityEngine;
+using uPLibrary.Networking.M2Mqtt.Messages;
+using M2MqttUnity;
+using UnityEngine.UI;
+using System.Collections.Generic;
+
+public class motor : M2MqttUnityClient
+{
+    public bool autoTest = false;
+    private List<string> eventMessages = new List<string>();
+    public Button ON;
+    public Button OFF;
+    public Text Consoletextbox;
+    public Animator anim;
+
+    public void begin()
+    {
+        anim = GetComponent<Animator>();
+    }
+    public void OnClick1()
+    {
+        // Now, publish "2" to turn off the flow sensor
+        client.Publish("oilnew/motor", System.Text.Encoding.UTF8.GetBytes("3"), MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE, false);
+        Debug.Log("Motor ON");
+        Consoletextbox.text = "Motor ON";
+        anim.speed = 1;
+    }
+
+    public void OnClick0()
+    {
+        // Now, publish "1" to turn off the temp sensor
+        client.Publish("oilnew/motor", System.Text.Encoding.UTF8.GetBytes("0"), MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE, false);
+        Debug.Log("Motor OFF");
+        Consoletextbox.text = "Motor OFF";
+        anim.speed = 0;
+    }
+protected override void DecodeMessage(string topic, byte[] message)
+    {
+        string msg = System.Text.Encoding.UTF8.GetString(message);
+        Debug.Log("Received: " + msg);
+        StoreMessage(msg);
+        if (topic == "oilnew/motor")
+        {
+            if (autoTest)
+            {
+                autoTest = false;
+                Disconnect();
+            }
+        }
+    }
+
+    private void StoreMessage(string eventMsg)
+    {
+        eventMessages.Add(eventMsg);
+    }
+
+    private void OnValidate()
+    {
+        if (autoTest)
+        {
+            autoConnect = true;
+        }
+    }
+}
