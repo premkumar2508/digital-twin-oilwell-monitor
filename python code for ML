@@ -1,0 +1,68 @@
+import paho.mqtt.client as mqtt
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from collections import deque
+import random
+
+# MQTT Broker settings
+broker_address = "broker.emqx.io"  # Replace with your broker address
+broker_port = 1883
+
+temperature_topic = "testtopic/temp"
+
+# Data storage for plotting
+temp_data = deque(maxlen=200)  # Stores the last 200 temperature values
+time_data = deque(maxlen=200)  # Stores the corresponding time steps
+
+# Time counter for x-axis
+time_counter = 0
+
+def on_connect(client, userdata, flags, rc):
+    print(f"Connected with result code {rc}")
+    client.subscribe(temperature_topic)
+
+def on_message(client, userdata, msg):
+    global time_counter  # Declare time_counter as global
+
+    # Handle temperature message, assuming format like '27.00 °C'
+    temperature_str = msg.payload.decode()
+    try:
+        temperature = float(temperature_str.split()[0])  # Extract numeric part
+        temperature += random.uniform(-0.5, 0.5)  # Simulate small fluctuations
+        temp_data.append(temperature)
+        print(f"Temperature: {temperature:.2f}°C")
+
+        # Update time data for the graph
+        time_data.append(time_counter)
+        time_counter += 1  # Increment time only once per message received
+
+    except ValueError:
+        print(f"Could not convert temperature: {temperature_str}")
+
+def animate(i):
+    plt.clf()  # Clear the current figure
+
+    # Plot temperature data
+    plt.plot(time_data, temp_data, label='Temperature (°C)', color='green')
+    plt.title('Temperature over Time')
+    plt.ylabel('Temperature (°C)')
+    plt.ylim(15, 40)  # Set Y-axis for temperature between 15 and 40°C
+    plt.xlim(0, max(len(time_data)-1, 1))  # Adjust X-axis limit based on data
+    plt.xticks(range(0, len(time_data), max(1, len(time_data)//10)))  # Dynamic X-axis ticks
+    plt.legend(loc='upper left')
+
+def main():
+    client = mqtt.Client()
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.connect(broker_address, broker_port, 60)
+
+    fig = plt.figure()
+    ani = animation.FuncAnimation(fig, animate, interval=1000)  # Update every second
+
+    client.loop_start()  # Start the MQTT loop in a background thread
+    plt.show()  # Display the plot
+    client.loop_stop()  # Stop the MQTT loop when the plot window is closed
+
+if name == "main":
+    main()
