@@ -1,0 +1,187 @@
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+
+// Motor control pins const int ENA = D7; const int IN1 = D1; const int IN2 = D2;
+// WiFi credentials
+const char* ssid = "Prem"; 
+const char* pass = "Prem1234";
+// MQTT broker details
+const char* broker = "broker.emqx.io"; 
+const int mqttPort = 1883;
+const char* motorControlTopic = "testtopic/motor"; 
+const char* tempTopic = "testtopic/temp";
+const char* waterLevelTopic = "testtopic/waterlevel";
+const char* motorSpeedTopic = "rl/motorSpeed"; // Topic for RL motor speed const char* maintenanceTopic = "maintenance/status"; // Topic for predictive maintenance
+// Water Level Sensor
+#define WATER_LEVEL_SENSOR_PIN A0
+
+// DS18B20 Temperature Sensor #define ONE_WIRE_BUS 2
+OneWire oneWire(ONE_WIRE_BUS); 
+DallasTemperature sensors(&oneWire);
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+long currentMillis = 0;
+long previousMillis = 0;
+int interval = 1000;
+boolean sendData = true;
+boolean sendTemperature = true;
+boolean sendWaterLevel = true;
+boolean sendToSerial = true;
+
+float temperature = 0.0; int waterLevel = 0;
+bool maintenanceRequired = false;
+
+
+void setup() 
+{
+  Serial.begin(115200);
+
+// Initialize motor pins pinMode(ENA, OUTPUT); pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+
+// Initialize water level sensor pinMode(WATER_LEVEL_SENSOR_PIN, INPUT);
+
+// Connect to Wi-Fi setupWiFi();
+// Set up MQTT client client.setServer(broker, mqttPort); client.setCallback(mqttCallback);
+// Initialize temperature sensor sensors.begin();
+// Initial motor state (OFF) digitalWrite(IN1, LOW); digitalWrite(IN2, LOW); analogWrite(ENA, 0);
+}
+
+void loop()
+{
+if (!client.connected())
+{
+  reconnect();
+}
+client.loop();
+currentMillis = millis();
+if (currentMillis - previousMillis >= interval && sendData)
+{
+  previousMillis = currentMillis;
+// Read temperature sensors.requestTemperatures();
+temperature = sensors.getTempCByIndex(0); 
+Serial.print("Temperature: "); 
+Serial.print(temperature);
+Serial.println(" °C");
+
+
+
+// Read water level
+waterLevel = analogRead(WATER_LEVEL_SENSOR_PIN); 
+waterLevel = map(waterLevel, 0, 1023, 0, 100); 
+Serial.print("Water Level: ");
+Serial.print(waterLevel);
+Serial.println(" %");
+
+// Publish temperature and water level to MQTT if (sendTemperature) {
+char tempMessage[50];
+snprintf(tempMessage, sizeof(tempMessage), "%.2f", temperature);
+client.publish(tempTopic, tempMessage);
+}
+if (sendWaterLevel) {
+char waterLevelMessage[50];
+snprintf(waterLevelMessage, sizeof(waterLevelMessage), "%d",
+waterLevel);
+client.publish(waterLevelTopic, waterLevelMessage);
+}
+
+
+// Check Maintenance Condition
+maintenanceRequired = checkMaintenance(temperature, waterLevel);
+
+if (maintenanceRequired) {
+// Stop the motor if maintenance is needed
+
+digitalWrite(IN1, LOW); 
+digitalWrite(IN2, LOW);
+analogWrite(ENA, 0);
+
+client.publish(maintenanceTopic, "Motor Stopped due to Maintenance Condition");
+Serial.println("Motor Stopped Due to Maintenance Condition");
+}
+}
+}
+
+
+void setupWiFi() 
+{
+Serial.print("Connecting to "); 
+Serial.println(ssid); WiFi.begin(ssid, pass);
+
+while (WiFi.status() != WL_CONNECTED) 
+{ 
+delay(500);
+Serial.print(".");
+}
+Serial.println("\nWiFi connected");
+Serial.println("IP address: "); 
+Serial.println(WiFi.localIP());
+}
+
+void reconnect() {
+while (!client.connected()) 
+{
+Serial.print("Attempting MQTT connection...");
+String clientId = "ESP8266Client";
+clientId += String(random(0xffff), HEX);
+if (client.connect(clientId.c_str()))
+{
+Serial.println("connected"); 
+client.subscribe(motorControlTopic);
+client.subscribe(motorSpeedTopic); // Subscribe to RL motor speed topic
+
+}
+else 
+{
+Serial.print("failed, rc=");
+Serial.print(client.state());
+Serial.println(" try again in 5 seconds"); 
+delay(5000);
+}
+}
+}
+
+void mqttCallback(char* topic, byte* payload, unsigned int length)
+{
+Serial.print("Message arrived [");
+Serial.print(topic); Serial.print("] ");
+String message;
+for (int i = 0; i < length; i++) { message += (char)payload[i];
+}
+Serial.println(message);
+// If maintenance is required, ignore motor commands if (maintenanceRequired) {
+Serial.println(" Motor Control Ignored: Maintenance Condition Active"); return;
+}
+
+// Motor control based on received message if (String(topic) == motorControlTopic) {
+if (message == "1") { 
+digitalWrite(IN1, HIGH);
+ digitalWrite(IN2, LOW);
+analogWrite(ENA, 255); // Full speed
+
+
+Serial.println("Motor ON");
+} else if (message == "0") { digitalWrite(IN1, LOW); digitalWrite(IN2, LOW); analogWrite(ENA, 0); // Stop the motor Serial.println("Motor OFF");
+}
+}
+
+// Motor speed control from RL server if (String(topic) == motorSpeedTopic) {
+int motorSpeed = message.toInt(); // Convert message to integer speed analogWrite(ENA, motorSpeed); // Set motor speed Serial.print("Motor Speed Set by RL: ");
+Serial.println(motorSpeed);
+}
+}
+
+// Predictive Maintenance Check
+bool checkMaintenance(float temperature, int waterLevel) { if (temperature > 85.0) {
+Serial.println(" Maintenance Required: High Temperature! Motor Stopping...");
+return true; // Maintenance needed
+} else if (waterLevel < 10) {
+Serial.println(" Maintenance Required: Low Water Level! Motor Stopping...");
+
+return true; // Maintenance needed
+}
+return false; // No issues
